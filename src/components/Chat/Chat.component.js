@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useRef } from "react";
+import { useHistory } from "react-router-dom";
+
 import io from "socket.io-client";
 import * as qs from "query-string";
 
@@ -12,28 +14,39 @@ const connectionOptions = {
   transports: ["websocket"],
 };
 let socket;
+const isPreset = (text) => !!PRESETS.includes(text);
 
 export const Chat = (...props) => {
   const [response, setResponse] = useState([]);
+  const [currentUsersInRoom, setCurrentUsersInRoom] = useState([]);
   const [currentMsg, setCurrentMsg] = useState("");
-  const [myId, setmyId] = useState("");
+  const [myId, setMyId] = useState("");
+  let history = useHistory();
+  
   const { room, username } = qs.parse(props[0].location.search);
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
     socket = io(ENDPOINT, connectionOptions);
-    socket.emit("joinRoom", { room, username });
-    socket.on("msgFromServer", (data) => {
-      setResponse((msgHistory) => [...msgHistory, data]);
-      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    socket.on("connect", () => {
+      setMyId(socket.id);
+      socket.emit("joinRoom", { room, username, id: socket.id });
+      socket.on("msgFromServer", (data) => {
+        setResponse((msgHistory) => [...msgHistory, data]);
+        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+      });
+
+      socket.on("updateUsersInRoom", (data) => {
+        console.log(data);
+        setCurrentUsersInRoom(data.users);
+      });
     });
-    return () => socket.disconnect();
   }, []);
 
   const handleOnSend = (e) => {
     e.preventDefault();
-    setmyId(socket.id);
     const message = { msg: e.target.elements.msg.value, username };
+    console.log({ myId });
     socket.emit("msgFromUser", message);
     setCurrentMsg("");
   };
@@ -42,14 +55,19 @@ export const Chat = (...props) => {
     setCurrentMsg(e.target.value);
   };
 
-  const isPreset = (text) => !!PRESETS.includes(text);
+  const handleOnDisconnect = () => {
+    socket.emit("leavingRoom", { room, username });
+    socket.disconnect();
+    history.push('/')
+  };
+
   return (
     <>
       <div className="chat-container">
         <header className="chat-header">
-          <a href="index.html" className="btn">
+          <button className="btn" onClick={handleOnDisconnect}>
             Leave Room
-          </a>
+          </button>
         </header>
         <main className="chat-main">
           <div className="chat-sidebar">
@@ -58,7 +76,14 @@ export const Chat = (...props) => {
             </h3>
             <h2 id="room-name">{room}</h2>
             <h3>
-              <i className="fas fa-users"></i> Users
+              <i className="fas fa-users"></i> Online now:
+              {!!currentUsersInRoom.length && (
+                <ul>
+                  {currentUsersInRoom.map((user, j) => (
+                    <li key={j}>{user.username}</li>
+                  ))}
+                </ul>
+              )}
             </h3>
             <ul id="users"></ul>
           </div>
